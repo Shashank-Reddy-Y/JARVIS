@@ -15,6 +15,14 @@ encodings = {
     "curie": tiktoken.get_encoding("r50k_base"),
     "babbage": tiktoken.get_encoding("r50k_base"),
     "ada": tiktoken.get_encoding("r50k_base"),
+    # Use GPT-3.5-turbo encoding as approximation for other models
+    "deepseek/deepseek-r1-0528:free": tiktoken.get_encoding("cl100k_base"),
+    "deepseek/deepseek-r1:free": tiktoken.get_encoding("cl100k_base"),
+    "deepseek/deepseek-chat": tiktoken.get_encoding("cl100k_base"),
+    "deepseek/deepseek-coder": tiktoken.get_encoding("cl100k_base"),
+    "gemini-pro": tiktoken.get_encoding("cl100k_base"),
+    "gemini-1.5-pro": tiktoken.get_encoding("cl100k_base"),
+    "gemini-1.5-flash": tiktoken.get_encoding("cl100k_base"),
 }
 
 max_length = {
@@ -31,7 +39,14 @@ max_length = {
     "davinci": 2049,
     "curie": 2049,
     "babbage": 2049,
-    "ada": 2049
+    "ada": 2049,
+    "deepseek/deepseek-r1-0528:free": 32768,
+    "deepseek/deepseek-r1:free": 32768,
+    "deepseek/deepseek-chat": 32768,
+    "deepseek/deepseek-coder": 16384,   # DeepSeek V2 has 32k context
+    "gemini-pro": 30720,     # Gemini Pro has ~30k tokens
+    "gemini-1.5-pro": 1000000,  # Gemini 1.5 Pro has 1M context
+    "gemini-1.5-flash": 1000000
 }
 
 def count_tokens(model_name, text):
