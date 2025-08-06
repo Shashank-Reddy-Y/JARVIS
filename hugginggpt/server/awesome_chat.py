@@ -87,6 +87,8 @@ elif "azure" in config:
     API_TYPE = "azure"
 elif "openai" in config:
     API_TYPE = "openai"
+elif "openrouter" in config:   # 👈 Add this block
+    API_TYPE = "openrouter"
 else:
     logger.warning(f"No endpoint specified in {args.config}. The endpoint will be set dynamically according to the client.")
 
@@ -100,6 +102,9 @@ if API_TYPE == "local":
 elif API_TYPE == "azure":
     API_ENDPOINT = f"{config['azure']['base_url']}/openai/deployments/{config['azure']['deployment_name']}/{api_name}?api-version={config['azure']['api_version']}"
     API_KEY = config["azure"]["api_key"]
+elif API_TYPE == "openrouter":
+    API_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+    API_KEY = config["openrouter"]["api_key"]
 elif API_TYPE == "openai":
     API_ENDPOINT = f"https://api.openai.com/v1/{api_name}"
     if config["openai"]["api_key"].startswith("sk-"):  # Check for valid OpenAI key in config file
@@ -200,6 +205,11 @@ def send_request(data):
         HEADER = {
             "api-key": api_key,
             "Content-Type": "application/json"
+        }
+    elif api_type == "openrouter": 
+        HEADER = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",          # optional, for OpenRouter dashboard clarity
         }
     else:
         HEADER = None
