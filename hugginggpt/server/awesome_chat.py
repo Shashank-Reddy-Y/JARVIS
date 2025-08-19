@@ -97,9 +97,9 @@ if args.mode in ["test", "cli"]:
 
 API_KEY = None
 API_ENDPOINT = None
-if API_TYPE == "local":
-    API_ENDPOINT = f"{config['local']['endpoint']}/v1/{api_name}"
-elif API_TYPE == "azure":
+# if API_TYPE == "local":
+#     API_ENDPOINT = f"{config['local']['endpoint']}/v1/{api_name}"
+if API_TYPE == "azure":
     API_ENDPOINT = f"{config['azure']['base_url']}/openai/deployments/{config['azure']['deployment_name']}/{api_name}?api-version={config['azure']['api_version']}"
     API_KEY = config["azure"]["api_key"]
 elif API_TYPE == "openrouter":
@@ -206,7 +206,7 @@ def send_request(data):
             "api-key": api_key,
             "Content-Type": "application/json"
         }
-    elif api_type == "openrouter": 
+    elif api_type == "openrouter":  # ✅ ADD THIS
         HEADER = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",          # optional, for OpenRouter dashboard clarity
@@ -433,12 +433,12 @@ def huggingface_model_inference(model_id, data, task):
         json_data["inputs"]["question"] = text
         json_data["inputs"]["image"] = img_base64
         result = requests.post(task_url, headers=HUGGINGFACE_HEADERS, json=json_data).json()
-        # result = inference(inputs) # not support
+        result = inference(inputs) # not support
 
     if task == "image-to-image":
         img_url = data["image"]
         img_data = image_to_bytes(img_url)
-        # result = inference(data=img_data) # not support
+        result = inference(data=img_data) # not support
         HUGGINGFACE_HEADERS["Content-Length"] = str(len(img_data))
         r = requests.post(task_url, headers=HUGGINGFACE_HEADERS, data=img_data)
         result = r.json()
@@ -685,11 +685,18 @@ def get_model_status(model_id, url, headers, queue = None):
             queue.put((model_id, False, None))
         return False
 
+# SOLUTION 1: Add this enhanced get_avaliable_models function to your awesome_chat.py
+# Replace the existing get_avaliable_models function with this one:
+
+# Replace the existing get_avaliable_models function in awesome_chat.py with this one:
+
 def get_avaliable_models(candidates, topk=5):
+    """Enhanced model availability checker with fallback for text-to-image"""
     all_available_models = {"local": [], "huggingface": []}
     threads = []
     result_queue = Queue()
 
+    # Start threads to check model status
     for candidate in candidates:
         model_id = candidate["id"]
 
@@ -704,20 +711,186 @@ def get_avaliable_models(candidates, topk=5):
             thread = threading.Thread(target=get_model_status, args=(model_id, localStatusUrl, {}, result_queue))
             threads.append(thread)
             thread.start()
-        
+    
+    # Collect results with timeout
     result_count = len(threads)
-    while result_count:
-        model_id, status, endpoint_type = result_queue.get()
-        if status and model_id not in all_available_models:
-            all_available_models[endpoint_type].append(model_id)
-        if len(all_available_models["local"] + all_available_models["huggingface"]) >= topk:
-            break
-        result_count -= 1
+    timeout_counter = 0
+    
+    while result_count and timeout_counter < 30:  # 30 second timeout
+        try:
+            model_id, status, endpoint_type = result_queue.get(timeout=1)
+            if status and model_id not in all_available_models:
+                all_available_models[endpoint_type].append(model_id)
+            if len(all_available_models["local"] + all_available_models["huggingface"]) >= topk:
+                break
+            result_count -= 1
+        except:
+            timeout_counter += 1
 
+    # Wait for remaining threads to finish
     for thread in threads:
-        thread.join()
+        thread.join(timeout=2)  # Don't wait too long
+
+    total_available = len(all_available_models["local"] + all_available_models["huggingface"])
+    
+    # CRITICAL FIX: If no models are "loaded" but we have candidates, add them anyway for text-to-image
+    # Many HF models show as "not loaded" but will load when requested
+    if total_available == 0 and candidates:
+        # Check if this is a text-to-image task
+        if candidates[0].get("task") == "text-to-image":
+            logger.warning("⚠️ No text-to-image models show as 'loaded' - adding top candidates anyway")
+            logger.warning("💡 Hugging Face models often need to 'warm up' on first use")
+            
+            # Add the most popular/reliable models even if they show as "not loaded"
+            priority_models = [
+                "runwayml/stable-diffusion-v1-5",
+                "stabilityai/stable-diffusion-2-1", 
+                "CompVis/stable-diffusion-v1-4",
+                "stabilityai/stable-diffusion-xl-base-1.0"
+            ]
+            
+            added_count = 0
+            for candidate in candidates:
+                if added_count >= topk:
+                    break
+                    
+                model_id = candidate["id"]
+                
+                # Prioritize well-known models
+                if model_id in priority_models:
+                    all_available_models["huggingface"].append(model_id)
+                    logger.info(f"🔄 Added priority model: {model_id}")
+                    added_count += 1
+            
+            # If we still don't have enough, add any remaining candidates
+            if added_count < topk:
+                for candidate in candidates:
+                    if added_count >= topk:
+                        break
+                        
+                    model_id = candidate["id"]
+                    if model_id not in all_available_models["huggingface"]:
+                        all_available_models["huggingface"].append(model_id)
+                        logger.info(f"🔄 Added fallback model: {model_id}")
+                        added_count += 1
 
     return all_available_models
+
+# SOLUTION 2: Add this enhanced huggingface inference function
+# Add this new function to awesome_chat.py.
+# You can place it right after the original huggingface_model_inference function.
+
+def huggingface_model_inference_enhanced(model_id, data, task):
+    """Enhanced HuggingFace inference that handles model loading gracefully and sets correct headers."""
+    
+    # This function now correctly handles text-to-image tasks
+    if task == "text-to-image":
+        task_url = f"https://api-inference.huggingface.co/models/{model_id}"
+        payload = {"inputs": data["text"]}
+        
+        logger.info(f"🎨 Generating image with {model_id}: '{payload['inputs']}'")
+        
+        try:
+            # First attempt - using json=payload is crucial as it sets the correct Content-Type header
+            response = requests.post(
+                task_url, 
+                headers=HUGGINGFACE_HEADERS, 
+                json=payload,
+                timeout=45  # Increased timeout slightly for the first attempt
+            )
+            
+            # --- Success Case ---
+            if response.status_code == 200 and 'image' in response.headers.get('content-type', ''):
+                name = str(uuid.uuid4())[:4]
+                image_path = f"public/images/{name}.jpeg"
+                
+                with open(image_path, "wb") as f:
+                    f.write(response.content)
+                
+                logger.info(f"✅ Image generated successfully: {image_path}")
+                return {"generated image": f"/images/{name}.jpeg"}
+                
+            # --- Model Loading Case ---
+            elif response.status_code == 503:
+                error_data = response.json()
+                estimated_time = error_data.get("estimated_time", 60)
+                logger.warning(f"⏳ Model {model_id} is loading... estimated time: {estimated_time:.2f}s")
+                
+                wait_time = min(estimated_time + 10, 180) # Wait for estimated time + buffer, max 3 mins
+                logger.info(f"⏰ Waiting {wait_time:.2f}s for the model to warm up.")
+                time.sleep(wait_time)
+                
+                # --- Retry Attempt ---
+                logger.info(f"🔄 Retrying inference for {model_id}...")
+                retry_response = requests.post(
+                    task_url, 
+                    headers=HUGGINGFACE_HEADERS, 
+                    json=payload,
+                    timeout=120 # Longer timeout for the retry
+                )
+                
+                if retry_response.status_code == 200 and 'image' in retry_response.headers.get('content-type', ''):
+                    name = str(uuid.uuid4())[:4]
+                    image_path = f"public/images/{name}.jpeg"
+                    
+                    with open(image_path, "wb") as f:
+                        f.write(retry_response.content)
+                    
+                    logger.info(f"✅ Image generated successfully after retry: {image_path}")
+                    return {"generated image": f"/images/{name}.jpeg"}
+                else:
+                    # If retry fails, report the error
+                    logger.error(f"❌ Retry failed. Status: {retry_response.status_code}, Response: {retry_response.text[:200]}")
+                    return {"error": f"Model retry failed with status {retry_response.status_code}: {retry_response.text[:100]}"}
+
+            # --- Other Failure Case ---
+            else:
+                logger.error(f"❌ Inference failed. Status: {response.status_code}, Response: {response.text[:200]}")
+                return {"error": f"Model inference failed with status {response.status_code}: {response.text[:100]}"}
+            
+        except requests.exceptions.Timeout:
+            logger.error(f"⏰ Request timed out for {model_id}. The model might be overloaded or taking too long to load.")
+            return {"error": "Request timed out. The model may be overloaded or unavailable."}
+        except Exception as e:
+            logger.error(f"❌ An unexpected error occurred during inference: {e}")
+            traceback.print_exc()
+            return {"error": f"An unexpected error occurred: {str(e)}"}
+    
+    # For all other non-text-to-image tasks, use the original function as a fallback
+    logger.info(f"Passing task '{task}' to original inference function.")
+    return huggingface_model_inference(model_id, data, task)
+
+# SOLUTION 3: Update your model_inference function to use the enhanced version
+# Replace the existing model_inference function in awesome_chat.py with this one:
+
+def model_inference(model_id, data, hosted_on, task):
+    """Enhanced model inference with better text-to-image support"""
+    
+    # Determine hosting if unknown
+    if hosted_on == "unknown":
+        localStatusUrl = f"{Model_Server}/status/{model_id}"
+        r = requests.get(localStatusUrl)
+        logger.debug("Local Server Status: " + str(r.json()))
+        if r.status_code == 200 and "loaded" in r.json() and r.json()["loaded"]:
+            hosted_on = "local"
+        else:
+            hosted_on = "huggingface"  # Default to HF for text-to-image
+    
+    try:
+        if hosted_on == "local":
+            inference_result = local_model_inference(model_id, data, task)
+        elif hosted_on == "huggingface":
+            # Use enhanced inference for text-to-image, original for others
+            if task == "text-to-image":
+                inference_result = huggingface_model_inference_enhanced(model_id, data, task)
+            else:
+                inference_result = huggingface_model_inference(model_id, data, task)
+    except Exception as e:
+        print(e)
+        traceback.print_exc()
+        inference_result = {"error": {"message": str(e)}}
+    
+    return inference_result
 
 def collect_result(command, choose, inference_result):
     result = {"task": command}
@@ -834,59 +1007,65 @@ def run_task(input, command, results, api_key, api_type, api_endpoint):
         results[id] = collect_result(command, choose, {"response": response})
         return True
     else:
-        if task not in MODELS_MAP:
-            logger.warning(f"no available models on {task} task.")
-            record_case(success=False, **{"input": input, "task": command, "reason": f"task not support: {command['task']}", "op":"message"})
-            inference_result = {"error": f"{command['task']} not found in available tasks."}
-            results[id] = collect_result(command, "", inference_result)
-            return False
+        if task == "text-to-image":
+            logger.info("🎨 Overriding model selection for text-to-image. Forcing SDXL.")
+            best_model_id = "stabilityai/stable-diffusion-xl-base-1.0"
+            hosted_on = "huggingface"
+            choose = {"id": best_model_id, "reason": "Hardcoded for stability."}
+        else:   
+            if task not in MODELS_MAP:
+                logger.warning(f"no available models on {task} task.")
+                record_case(success=False, **{"input": input, "task": command, "reason": f"task not support: {command['task']}", "op":"message"})
+                inference_result = {"error": f"{command['task']} not found in available tasks."}
+                results[id] = collect_result(command, "", inference_result)
+                return False
 
-        candidates = MODELS_MAP[task][:10]
-        all_avaliable_models = get_avaliable_models(candidates, config["num_candidate_models"])
-        all_avaliable_model_ids = all_avaliable_models["local"] + all_avaliable_models["huggingface"]
-        logger.debug(f"avaliable models on {command['task']}: {all_avaliable_models}")
+            candidates = MODELS_MAP[task][:10]
+            all_avaliable_models = get_avaliable_models(candidates, config["num_candidate_models"])
+            all_avaliable_model_ids = all_avaliable_models["local"] + all_avaliable_models["huggingface"]
+            logger.debug(f"avaliable models on {command['task']}: {all_avaliable_models}")
 
-        if len(all_avaliable_model_ids) == 0:
-            logger.warning(f"no available models on {command['task']}")
-            record_case(success=False, **{"input": input, "task": command, "reason": f"no available models: {command['task']}", "op":"message"})
-            inference_result = {"error": f"no available models on {command['task']} task."}
-            results[id] = collect_result(command, "", inference_result)
-            return False
-            
-        if len(all_avaliable_model_ids) == 1:
-            best_model_id = all_avaliable_model_ids[0]
-            hosted_on = "local" if best_model_id in all_avaliable_models["local"] else "huggingface"
-            reason = "Only one model available."
-            choose = {"id": best_model_id, "reason": reason}
-            logger.debug(f"chosen model: {choose}")
-        else:
-            cand_models_info = [
-                {
-                    "id": model["id"],
-                    "inference endpoint": all_avaliable_models.get(
-                        "local" if model["id"] in all_avaliable_models["local"] else "huggingface"
-                    ),
-                    "likes": model.get("likes"),
-                    "description": model.get("description", "")[:config["max_description_length"]],
-                    # "language": model.get("meta").get("language") if model.get("meta") else None,
-                    "tags": model.get("meta").get("tags") if model.get("meta") else None,
-                }
-                for model in candidates
-                if model["id"] in all_avaliable_model_ids
-            ]
-
-            choose_str = choose_model(input, command, cand_models_info, api_key, api_type, api_endpoint)
-            logger.debug(f"chosen model: {choose_str}")
-            try:
-                choose = json.loads(choose_str)
-                reason = choose["reason"]
-                best_model_id = choose["id"]
+            if len(all_avaliable_model_ids) == 0:
+                logger.warning(f"no available models on {command['task']}")
+                record_case(success=False, **{"input": input, "task": command, "reason": f"no available models: {command['task']}", "op":"message"})
+                inference_result = {"error": f"no available models on {command['task']} task."}
+                results[id] = collect_result(command, "", inference_result)
+                return False
+                
+            if len(all_avaliable_model_ids) == 1:
+                best_model_id = all_avaliable_model_ids[0]
                 hosted_on = "local" if best_model_id in all_avaliable_models["local"] else "huggingface"
-            except Exception as e:
-                logger.warning(f"the response [ {choose_str} ] is not a valid JSON, try to find the model id and reason in the response.")
-                choose_str = find_json(choose_str)
-                best_model_id, reason, choose  = get_id_reason(choose_str)
-                hosted_on = "local" if best_model_id in all_avaliable_models["local"] else "huggingface"
+                reason = "Only one model available."
+                choose = {"id": best_model_id, "reason": reason}
+                logger.debug(f"chosen model: {choose}")
+            else:
+                cand_models_info = [
+                    {
+                        "id": model["id"],
+                        "inference endpoint": all_avaliable_models.get(
+                            "local" if model["id"] in all_avaliable_models["local"] else "huggingface"
+                        ),
+                        "likes": model.get("likes"),
+                        "description": model.get("description", "")[:config["max_description_length"]],
+                        # "language": model.get("meta").get("language") if model.get("meta") else None,
+                        "tags": model.get("meta").get("tags") if model.get("meta") else None,
+                    }
+                    for model in candidates
+                    if model["id"] in all_avaliable_model_ids
+                ]
+
+                choose_str = choose_model(input, command, cand_models_info, api_key, api_type, api_endpoint)
+                logger.debug(f"chosen model: {choose_str}")
+                try:
+                    choose = json.loads(choose_str)
+                    reason = choose["reason"]
+                    best_model_id = choose["id"]
+                    hosted_on = "local" if best_model_id in all_avaliable_models["local"] else "huggingface"
+                except Exception as e:
+                    logger.warning(f"the response [ {choose_str} ] is not a valid JSON, try to find the model id and reason in the response.")
+                    choose_str = find_json(choose_str)
+                    best_model_id, reason, choose  = get_id_reason(choose_str)
+                    hosted_on = "local" if best_model_id in all_avaliable_models["local"] else "huggingface"
     inference_result = model_inference(best_model_id, args, hosted_on, command['task'])
 
     if "error" in inference_result:
