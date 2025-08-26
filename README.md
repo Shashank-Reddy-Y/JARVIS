@@ -2,7 +2,7 @@
    1) I have modified the original code to work with OpenROuter Free API's so, I can test it freely and work on more changes.
    2) Next, i have integrated or implemented the use of text-to-image models through huggingface API endpoints directly through the code.
    3) Now I am working on use of other free models avialble other than hugginface as i have ran out of free credits to run inference.
-   4) Trying to use fireworks.ai
+   4) Trying to use fireworks.ai, google models for free inference
 
 # Goals of Project:
    1) I want to tackle some of limitations in the current project like lack of feefback loop
