@@ -21,6 +21,8 @@ encodings = {
     "deepseek/deepseek-chat": tiktoken.get_encoding("cl100k_base"),
     "deepseek/deepseek-coder": tiktoken.get_encoding("cl100k_base"),
     "gemini-pro": tiktoken.get_encoding("cl100k_base"),
+    "google/gemma-3n-e2b-it:free": tiktoken.get_encoding("cl100k_base"),
+    "openai/gpt-oss-20b:free":tiktoken.get_encoding("cl100k_base"),
     "gemini-1.5-pro": tiktoken.get_encoding("cl100k_base"),
     "gemini-1.5-flash": tiktoken.get_encoding("cl100k_base"),
 }
@@ -40,6 +42,8 @@ max_length = {
     "curie": 2049,
     "babbage": 2049,
     "ada": 2049,
+    "openai/gpt-oss-20b:free":131072,
+    "google/gemma-3n-e2b-it:free": 8192,
     "deepseek/deepseek-r1-0528:free": 32768,
     "deepseek/deepseek-r1:free": 32768,
     "deepseek/deepseek-chat": 32768,
