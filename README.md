@@ -3,6 +3,9 @@
    2) Next, i have integrated or implemented the use of text-to-image models through huggingface API endpoints directly through the code.
    3) Now I am working on use of other free models avialble other than hugginface as i have ran out of free credits to run inference.
    4) Trying to use fireworks.ai, google models for free inference
+   5) The base paper Implementation is done. We have provided implementation for running few models using API's which were not there in the original repo.
+   6) Now we are trying out applying the huggingpt architecture and essence of the paper to a specialized domain like Finance.
+   7) This domain specific experimentation will be soon available on a seperate folder inside this repo.
 
 # Goals of Project:
    1) I want to tackle some of limitations in the current project like lack of feefback loop
